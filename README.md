@@ -15,7 +15,7 @@ Add this line to your application's Gemfile:
 
 OR
 
-    gem 'seedling', '~> 0.0.1', :git => "git@github.com/RealNobody/seedling.git"
+    gem 'seedling', '~> 0.0.1', :git => "git@github.com:RealNobody/seedling.git"
 
 And then execute:
 
