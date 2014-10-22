@@ -126,7 +126,9 @@ module Seedling
             active_record_create_order
           end
 
-          #TODO: add Sequel code for getting the create order here...
+          if Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
+            sequel_record_create_order
+          end
         end
 
         @@create_order
@@ -171,11 +173,11 @@ module Seedling
 
         table_objects.each do |table|
           unless Seedling::Seeder.create_order.include?(table)
-            prev_table = active_record_pre_table(table, polymorphic_tables)
+            prev_table = active_record_pre_table(table, polymorphic_tables, [])
 
             while (prev_table)
               Seedling::Seeder.create_order << prev_table
-              prev_table = active_record_pre_table(table, polymorphic_tables)
+              prev_table = active_record_pre_table(table, polymorphic_tables, [])
             end
 
             Seedling::Seeder.create_order << table
@@ -183,7 +185,46 @@ module Seedling
         end
       end
 
-      def active_record_pre_table(table, polymorphic_tables)
+      def sequel_record_create_order
+        table_objects = []
+
+        polymorphic_tables = {}
+
+        DB.tables.each do |table_name|
+          table = nil
+
+          if Object.const_defined?(table_name.to_s.classify)
+            table = table_name.to_s.classify.constantize
+          end
+
+          # is_a?(ActiveRecord::Base) doesn't work, so I am doing it this way...
+          table_is_sequel_model = false
+          table_super_class     = table.superclass if table
+          while !table_is_sequel_model && table_super_class
+            table_is_sequel_model = (table_super_class == Sequel::Model)
+            table_super_class     = table_super_class.superclass
+          end
+
+          table_objects << table if table && table_is_sequel_model
+        end
+
+        # Sequel doesn't natively support polymorphic tables, so we don't support them here.
+        table_objects.reverse.each do |table|
+          unless Seedling::Seeder.create_order.include?(table)
+            prev_table = sequel_pre_table(table, polymorphic_tables, [])
+
+            while (prev_table)
+              Seedling::Seeder.create_order << prev_table
+              prev_table = sequel_pre_table(table, polymorphic_tables, [])
+            end
+
+            Seedling::Seeder.create_order << table
+          end
+        end
+      end
+
+      def active_record_pre_table(table, polymorphic_tables, processing_tables)
+        processing_tables << table
         prev_table = nil
 
         relations = table.reflect_on_all_associations(:belongs_to)
@@ -199,13 +240,71 @@ module Seedling
             belongs_to_table_name = belongs_to.options[:class_name] || belongs_to.name
             prev_table            = belongs_to_table_name.to_s.classify.constantize
 
-            if Seedling::Seeder.create_order.include?(prev_table)
+            if prev_table &&
+                (Seedling::Seeder.create_order.include?(prev_table) ||
+                    table == prev_table ||
+                    processing_tables.include?(prev_table))
               prev_table = nil
             end
           end
 
           prev_prev_table = nil
-          prev_prev_table = active_record_pre_table(prev_table, polymorphic_tables) if prev_table
+          prev_prev_table = active_record_pre_table(prev_table, polymorphic_tables, processing_tables) if prev_table
+          prev_table      = prev_prev_table || prev_table
+
+          break if prev_table
+        end
+
+        prev_table
+      end
+
+      # associated_class is late-bound, and Sequel doesn't validate it until it is called.
+      # This causes it to be able to fail unexpectedly, This is just a little safer...
+      def sequel_associated_class(relation)
+        begin
+          relation.associated_class
+        rescue NameError => error
+          if Object.const_defined?(relation[:class_name].to_s.classify)
+            relation[:class_name].to_s.classify.constantize
+          else
+            nil
+          end
+        end
+      end
+
+      def sequel_pre_table(table, polymorphic_tables, processing_tables)
+        processing_tables << table
+        prev_table = nil
+
+        relations = table.all_association_reflections
+        relations.each do |belongs_to|
+          next unless [:one_through_one, :one_to_one, :many_to_one].include?(belongs_to[:type])
+
+          if [:one_through_one, :one_to_one].include?(belongs_to[:type])
+            related_table = sequel_associated_class(belongs_to)
+            if related_table
+              related_table.all_association_reflections.each do |reverse_reflection|
+                if sequel_associated_class(reverse_reflection) == table
+                  if [:one_to_many].include? reverse_reflection[:type]
+                    prev_table = related_table
+                    break
+                  end
+                end
+              end
+            end
+          else
+            prev_table = sequel_associated_class(belongs_to)
+          end
+
+          if prev_table &&
+              (Seedling::Seeder.create_order.include?(prev_table) ||
+                  table == prev_table ||
+                  processing_tables.include?(prev_table))
+            prev_table = nil
+          end
+
+          prev_prev_table = nil
+          prev_prev_table = sequel_pre_table(prev_table, polymorphic_tables, processing_tables) if prev_table
           prev_table      = prev_prev_table || prev_table
 
           break if prev_table
@@ -265,7 +364,7 @@ module Seedling
     end
 
     def initialize(table, seeder_class = nil)
-      @table = table
+      @table        = table
       @seeder_class = seeder_class
     end
 
