@@ -139,48 +139,50 @@ module Seedling
 
         polymorphic_tables = {}
 
-        ActiveRecord::Base.connection.tables.each do |table_name|
-          table = nil
+        if ActiveRecord::Base.connected?
+          ActiveRecord::Base.connection.tables.each do |table_name|
+            table = nil
 
-          if Object.const_defined?(table_name.to_s.classify)
-            table = table_name.to_s.classify.constantize
+            if Object.const_defined?(table_name.to_s.classify)
+              table = table_name.to_s.classify.constantize
+            end
+
+            # is_a?(ActiveRecord::Base) doesn't work, so I am doing it this way...
+            table_is_active_record = false
+            table_super_class      = table.superclass if table
+            while !table_is_active_record && table_super_class
+              table_is_active_record = (table_super_class == ActiveRecord::Base)
+              table_super_class      = table_super_class.superclass
+            end
+
+            table_objects << table if table && table_is_active_record
           end
 
-          # is_a?(ActiveRecord::Base) doesn't work, so I am doing it this way...
-          table_is_active_record = false
-          table_super_class      = table.superclass if table
-          while !table_is_active_record && table_super_class
-            table_is_active_record = (table_super_class == ActiveRecord::Base)
-            table_super_class      = table_super_class.superclass
-          end
+          table_objects.each do |table|
+            [:has_on, :has_many].each do |relationship|
+              table.reflect_on_all_associations(relationship).each do |association|
+                if association.options[:as]
+                  polymorphic_tables[association.class_name] ||= []
 
-          table_objects << table if table && table_is_active_record
-        end
-
-        table_objects.each do |table|
-          [:has_on, :has_many].each do |relationship|
-            table.reflect_on_all_associations(relationship).each do |association|
-              if association.options[:as]
-                polymorphic_tables[association.class_name] ||= []
-
-                unless polymorphic_tables[association.class_name].include?(table)
-                  polymorphic_tables[association.class_name] << table
+                  unless polymorphic_tables[association.class_name].include?(table)
+                    polymorphic_tables[association.class_name] << table
+                  end
                 end
               end
             end
           end
-        end
 
-        table_objects.each do |table|
-          unless Seedling::Seeder.create_order.include?(table)
-            prev_table = active_record_pre_table(table, polymorphic_tables, [])
-
-            while (prev_table)
-              Seedling::Seeder.create_order << prev_table
+          table_objects.each do |table|
+            unless Seedling::Seeder.create_order.include?(table)
               prev_table = active_record_pre_table(table, polymorphic_tables, [])
-            end
 
-            Seedling::Seeder.create_order << table
+              while (prev_table)
+                Seedling::Seeder.create_order << prev_table
+                prev_table = active_record_pre_table(table, polymorphic_tables, [])
+              end
+
+              Seedling::Seeder.create_order << table
+            end
           end
         end
       end
