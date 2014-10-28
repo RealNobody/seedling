@@ -139,7 +139,7 @@ module Seedling
 
         polymorphic_tables = {}
 
-        if ActiveRecord::Base.connected?
+        if ActiveRecord::Base.respond_to?(:connected?) && ActiveRecord::Base.connected?
           ActiveRecord::Base.connection.tables.each do |table_name|
             table = nil
 
