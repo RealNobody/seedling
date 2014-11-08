@@ -1,6 +1,7 @@
 module Seedling
   class Seeder
     attr_reader :table
+    attr_reader :seeder_class
 
     @@create_order   = nil
     @@seeder_classes = nil
@@ -55,7 +56,19 @@ module Seedling
 
           # table object seeders
           Seedling::Seeder.create_order.each do |table|
+            table_seed_class = Seedling::Seeder.seed_class(table.name)
+
+            if !table_seed_class && table.respond_to?(:seed)
+              table_seed_class = table
+            end
+
+            @@seeder_classes << Seedling::Seeder.new(table, table_seed_class)
+          end
+
+          # table object seeders
+          Seedling::Seeder.unclassed_tables.each do |table|
             table_seed_class = Seedling::Seeder.seed_class(table)
+
             @@seeder_classes << Seedling::Seeder.new(table, table_seed_class)
           end
 
@@ -118,9 +131,16 @@ module Seedling
         return check_class, full_module_name
       end
 
+      def unclassed_tables
+        create_order
+
+        @@other_tables
+      end
+
       def create_order
         unless @@create_order
           @@create_order = []
+          @@other_tables = []
 
           if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
             active_record_create_order
@@ -135,8 +155,7 @@ module Seedling
       end
 
       def active_record_create_order
-        table_objects = []
-
+        table_objects      = []
         polymorphic_tables = {}
 
         if ActiveRecord::Base.respond_to?(:connected?) && ActiveRecord::Base.connected?
@@ -145,6 +164,11 @@ module Seedling
 
             if Object.const_defined?(table_name.to_s.classify)
               table = table_name.to_s.classify.constantize
+            else
+              seeder = Seedling::Seeder.seed_class(table_name, true)
+              if seeder && seeder.respond_to?(:table)
+                table = seeder.table
+              end
             end
 
             # is_a?(ActiveRecord::Base) doesn't work, so I am doing it this way...
@@ -155,7 +179,11 @@ module Seedling
               table_super_class      = table_super_class.superclass
             end
 
-            table_objects << table if table && table_is_active_record
+            if table && table_is_active_record
+              table_objects << table
+            else
+              Seedling::Seeder.unclassed_tables << table_name
+            end
           end
 
           table_objects.each do |table|
@@ -189,8 +217,7 @@ module Seedling
 
       def sequel_record_create_order
         if Sequel::DATABASES.length > 0
-          table_objects = []
-
+          table_objects      = []
           polymorphic_tables = {}
 
           raise("Unsure what database to use.") if Sequel::DATABASES.length > 1
@@ -199,9 +226,14 @@ module Seedling
 
             if Object.const_defined?(table_name.to_s.classify)
               table = table_name.to_s.classify.constantize
+            else
+              seeder = Seedling::Seeder.seed_class(table_name, true)
+              if seeder && seeder.respond_to?(:table)
+                table = seeder.table
+              end
             end
 
-            # is_a?(ActiveRecord::Base) doesn't work, so I am doing it this way...
+            # is_a?(Sequel::Model) doesn't work, so I am doing it this way...
             table_is_sequel_model = false
             table_super_class     = table.superclass if table
             while !table_is_sequel_model && table_super_class
@@ -209,11 +241,15 @@ module Seedling
               table_super_class     = table_super_class.superclass
             end
 
-            table_objects << table if table && table_is_sequel_model
+            if table && table_is_sequel_model
+              table_objects << table
+            else
+              Seedling::Seeder.unclassed_tables << table_name
+            end
           end
 
           # Sequel doesn't natively support polymorphic tables, so we don't support them here.
-          table_objects.reverse.each do |table|
+          table_objects.each do |table|
             unless Seedling::Seeder.create_order.include?(table)
               prev_table = sequel_pre_table(table, polymorphic_tables, [])
 
@@ -318,8 +354,8 @@ module Seedling
         prev_table
       end
 
-      def seed_class(table)
-        seed_class_name      = "#{table.name}Seeder"
+      def seed_class(table_name, seek_table_name = false)
+        seed_class_name      = "#{table_name.to_s.classify}Seeder"
         seed_class_base_name = seed_class_name.demodulize
         base_module          = seed_class_name.split("::")[0..-2].join("::")
         base_module_classes  = [Object]
@@ -356,25 +392,19 @@ module Seedling
           require seeder_file
         end
 
-        unless return_class && return_class.respond_to?(:seed)
-          return_class = table
-        end
-
         unless return_class.respond_to?(:seed)
-          return_class = nil
+          unless seek_table_name && return_class.respond_to?(:table)
+            return_class = nil
+          end
         end
 
         return_class
       end
     end
 
-    def initialize(table, seeder_class = nil)
+    def initialize(table, seeder_class)
       @table        = table
       @seeder_class = seeder_class
-    end
-
-    def seeder_class
-      @seeder_class ||= Seedling::Seeder.seed_class(@table)
     end
 
     def seed
