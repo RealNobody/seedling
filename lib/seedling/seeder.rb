@@ -187,7 +187,7 @@ module Seedling
           end
 
           table_objects.each do |table|
-            [:has_on, :has_many].each do |relationship|
+            [:has_one, :has_many].each do |relationship|
               table.reflect_on_all_associations(relationship).each do |association|
                 if association.options[:as]
                   polymorphic_tables[association.class_name] ||= []
