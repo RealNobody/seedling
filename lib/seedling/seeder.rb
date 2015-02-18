@@ -3,8 +3,9 @@ module Seedling
     attr_reader :table
     attr_reader :seeder_class
 
-    @@create_order   = nil
-    @@seeder_classes = nil
+    @@create_order        = nil
+    @@seeder_classes      = nil
+    @@database_connection = nil
 
     class SeederSorter
       attr_accessor :seed_base_object
@@ -44,18 +45,18 @@ module Seedling
     end
 
     class << self
-      def seed_all
-        seeder_classes.each do |seed_class|
+      def seed_all(db_connection = nil)
+        seeder_classes(db_connection).each do |seed_class|
           seed_class.seed
         end
       end
 
-      def seeder_classes
+      def seeder_classes(db_connection = nil)
         unless @@seeder_classes
           @@seeder_classes = []
 
           # table object seeders
-          Seedling::Seeder.create_order.each do |table|
+          Seedling::Seeder.create_order(db_connection).each do |table|
             table_seed_class = Seedling::Seeder.seed_class(table.name)
 
             if !table_seed_class && table.respond_to?(:seed)
@@ -66,7 +67,7 @@ module Seedling
           end
 
           # table object seeders
-          Seedling::Seeder.unclassed_tables.each do |table|
+          Seedling::Seeder.unclassed_tables(db_connection).each do |table|
             table_seed_class = Seedling::Seeder.seed_class(table)
 
             @@seeder_classes << Seedling::Seeder.new(table, table_seed_class)
@@ -131,14 +132,24 @@ module Seedling
         return check_class, full_module_name
       end
 
-      def unclassed_tables
-        create_order
+      def unclassed_tables(db_connection = nil)
+        create_order(db_connection)
 
         @@other_tables
       end
 
-      def create_order
+      def create_order(db_connection = nil)
         unless @@create_order
+          @@database_connection = db_connection
+
+          if Object.const_defined?("ActiveRecord", false) && ActiveRecord.const_defined?("Base", false)
+            @@database_connection ||= ActiveRecord::Base
+          end
+
+          if Object.const_defined?("Sequel", false) && Sequel.const_defined?("Model", false)
+            @@database_connection ||= Sequel::DATABASES[0]
+          end
+
           @@create_order = []
           @@other_tables = []
 
@@ -158,18 +169,17 @@ module Seedling
         table_objects      = []
         polymorphic_tables = {}
 
-        ActiveRecord::Base.connection rescue nil
-        if ActiveRecord::Base.respond_to?(:connected?) && ActiveRecord::Base.connected?
-          ActiveRecord::Base.connection.tables.each do |table_name|
+        @@database_connection.connection rescue nil
+        if @@database_connection.respond_to?(:connected?) && @@database_connection.connected?
+          @@database_connection.connection.tables.each do |table_name|
             table = nil
 
-            if Object.const_defined?(table_name.to_s.classify)
+            seeder = Seedling::Seeder.seed_class(table_name, true)
+            if seeder && seeder.respond_to?(:table)
+              table = seeder.table
+            end
+            if !table && Object.const_defined?(table_name.to_s.classify)
               table = table_name.to_s.classify.constantize
-            else
-              seeder = Seedling::Seeder.seed_class(table_name, true)
-              if seeder && seeder.respond_to?(:table)
-                table = seeder.table
-              end
             end
 
             # is_a?(ActiveRecord::Base) doesn't work, so I am doing it this way...
@@ -222,16 +232,15 @@ module Seedling
           polymorphic_tables = {}
 
           raise("Unsure what database to use.") if Sequel::DATABASES.length > 1
-          Sequel::DATABASES[0].tables.each do |table_name|
+          @@database_connection.tables.each do |table_name|
             table = nil
 
-            if Object.const_defined?(table_name.to_s.classify)
+            seeder = Seedling::Seeder.seed_class(table_name, true)
+            if seeder && seeder.respond_to?(:table)
+              table = seeder.table
+            end
+            if !table && Object.const_defined?(table_name.to_s.classify)
               table = table_name.to_s.classify.constantize
-            else
-              seeder = Seedling::Seeder.seed_class(table_name, true)
-              if seeder && seeder.respond_to?(:table)
-                table = seeder.table
-              end
             end
 
             # is_a?(Sequel::Model) doesn't work, so I am doing it this way...
@@ -279,8 +288,8 @@ module Seedling
               end
             end
           else
-            belongs_to_table_name = belongs_to.options[:class_name] || belongs_to.name
-            prev_table            = belongs_to_table_name.to_s.classify.constantize
+            belongs_to_table_name = belongs_to.options[:class_name].to_s || belongs_to.name.to_s.classify
+            prev_table            = belongs_to_table_name.constantize
 
             if prev_table &&
                 (Seedling::Seeder.create_order.include?(prev_table) ||
