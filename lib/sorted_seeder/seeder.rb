@@ -1,4 +1,4 @@
-module Seedling
+module SortedSeeder
   class Seeder
     attr_reader :table
     attr_reader :seeder_class
@@ -56,21 +56,21 @@ module Seedling
           @@seeder_classes = []
 
           # table object seeders
-          Seedling::Seeder.create_order(db_connection).each do |table|
-            table_seed_class = Seedling::Seeder.seed_class(table.name)
+          SortedSeeder::Seeder.create_order(db_connection).each do |table|
+            table_seed_class = SortedSeeder::Seeder.seed_class(table.name)
 
             if !table_seed_class && table.respond_to?(:seed)
               table_seed_class = table
             end
 
-            @@seeder_classes << Seedling::Seeder.new(table, table_seed_class)
+            @@seeder_classes << SortedSeeder::Seeder.new(table, table_seed_class)
           end
 
           # table object seeders
-          Seedling::Seeder.unclassed_tables(db_connection).each do |table|
-            table_seed_class = Seedling::Seeder.seed_class(table)
+          SortedSeeder::Seeder.unclassed_tables(db_connection).each do |table|
+            table_seed_class = SortedSeeder::Seeder.seed_class(table)
 
-            @@seeder_classes << Seedling::Seeder.new(table, table_seed_class)
+            @@seeder_classes << SortedSeeder::Seeder.new(table, table_seed_class)
           end
 
           if Object.const_defined?("Rails", false)
@@ -97,7 +97,7 @@ module Seedling
 
               if check_class && check_class.respond_to?(:seed)
                 unless @@seeder_classes.include?(check_class) ||
-                    @@seeder_classes.any? { |seeder| seeder.is_a?(Seedling::Seeder) && seeder.seeder_class == check_class }
+                    @@seeder_classes.any? { |seeder| seeder.is_a?(SortedSeeder::Seeder) && seeder.seeder_class == check_class }
                   @@seeder_classes << check_class
                 end
               end
@@ -174,7 +174,7 @@ module Seedling
           @@database_connection.connection.tables.each do |table_name|
             table = nil
 
-            seeder = Seedling::Seeder.seed_class(table_name, true)
+            seeder = SortedSeeder::Seeder.seed_class(table_name, true)
             if seeder && seeder.respond_to?(:table)
               table = seeder.table
             end
@@ -193,7 +193,7 @@ module Seedling
             if table && table_is_active_record
               table_objects << table
             else
-              Seedling::Seeder.unclassed_tables << table_name
+              SortedSeeder::Seeder.unclassed_tables << table_name
             end
           end
 
@@ -212,15 +212,15 @@ module Seedling
           end
 
           table_objects.each do |table|
-            unless Seedling::Seeder.create_order.include?(table)
+            unless SortedSeeder::Seeder.create_order.include?(table)
               prev_table = active_record_pre_table(table, polymorphic_tables, [])
 
               while (prev_table)
-                Seedling::Seeder.create_order << prev_table
+                SortedSeeder::Seeder.create_order << prev_table
                 prev_table = active_record_pre_table(table, polymorphic_tables, [])
               end
 
-              Seedling::Seeder.create_order << table
+              SortedSeeder::Seeder.create_order << table
             end
           end
         end
@@ -235,7 +235,7 @@ module Seedling
           @@database_connection.tables.each do |table_name|
             table = nil
 
-            seeder = Seedling::Seeder.seed_class(table_name, true)
+            seeder = SortedSeeder::Seeder.seed_class(table_name, true)
             if seeder && seeder.respond_to?(:table)
               table = seeder.table
             end
@@ -254,21 +254,21 @@ module Seedling
             if table && table_is_sequel_model
               table_objects << table
             else
-              Seedling::Seeder.unclassed_tables << table_name
+              SortedSeeder::Seeder.unclassed_tables << table_name
             end
           end
 
           # Sequel doesn't natively support polymorphic tables, so we don't support them here.
           table_objects.each do |table|
-            unless Seedling::Seeder.create_order.include?(table)
+            unless SortedSeeder::Seeder.create_order.include?(table)
               prev_table = sequel_pre_table(table, polymorphic_tables, [])
 
               while (prev_table)
-                Seedling::Seeder.create_order << prev_table
+                SortedSeeder::Seeder.create_order << prev_table
                 prev_table = sequel_pre_table(table, polymorphic_tables, [])
               end
 
-              Seedling::Seeder.create_order << table
+              SortedSeeder::Seeder.create_order << table
             end
           end
         end
@@ -283,16 +283,16 @@ module Seedling
           if belongs_to.options && belongs_to.options[:polymorphic]
             if polymorphic_tables[table.name]
               polymorphic_tables[table.name].each do |polymorphic_prev_table|
-                prev_table = polymorphic_prev_table unless Seedling::Seeder.create_order.include?(polymorphic_prev_table)
+                prev_table = polymorphic_prev_table unless SortedSeeder::Seeder.create_order.include?(polymorphic_prev_table)
                 break if prev_table
               end
             end
           else
-            belongs_to_table_name = belongs_to.options[:class_name].to_s || belongs_to.name.to_s.classify
+            belongs_to_table_name = (belongs_to.options[:class_name] || belongs_to.name.to_s.classify).to_s
             prev_table            = belongs_to_table_name.constantize
 
             if prev_table &&
-                (Seedling::Seeder.create_order.include?(prev_table) ||
+                (SortedSeeder::Seeder.create_order.include?(prev_table) ||
                     table == prev_table ||
                     processing_tables.include?(prev_table))
               prev_table = nil
@@ -348,7 +348,7 @@ module Seedling
           end
 
           if prev_table &&
-              (Seedling::Seeder.create_order.include?(prev_table) ||
+              (SortedSeeder::Seeder.create_order.include?(prev_table) ||
                   table == prev_table ||
                   processing_tables.include?(prev_table))
             prev_table = nil
@@ -422,10 +422,10 @@ module Seedling
     end
 
     def <=>(other_object)
-      if (other_object.is_a?(Seedling::Seeder))
+      if (other_object.is_a?(SortedSeeder::Seeder))
         return 0 if other_object.table == self.table
 
-        Seedling::Seeder.create_order.each do |create_table|
+        SortedSeeder::Seeder.create_order.each do |create_table|
           if create_table == self.table
             return -1
           elsif create_table == other_object.table
