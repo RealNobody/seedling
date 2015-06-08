@@ -289,7 +289,13 @@ module SortedSeeder
             end
           else
             belongs_to_table_name = (belongs_to.options[:class_name] || belongs_to.name.to_s.classify).to_s
-            prev_table            = belongs_to_table_name.constantize
+            prev_table = belongs_to_table_name.constantize rescue nil
+
+            # belongs_to.klass SHOULD be what I want.
+            # for some reason when I was testing, this wasn't working well for me.
+            # I don't remember what happened, how or why.
+            # There ARE definite cases where the constantize doesn't work, so if it doesn't, fall back to the klass.
+            prev_table ||= belongs_to.klass
 
             if prev_table &&
                 (SortedSeeder::Seeder.create_order.include?(prev_table) ||
